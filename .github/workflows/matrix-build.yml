@@ -1,0 +1,153 @@
+name: Build (Linux/macOS x86_64/ARM64)
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Prefer online self-hosted runners registered to this fork, fall
+  # back to GitHub's hosted runners otherwise.  Requires the repository
+  # secret RUNNER_ADMIN_TOKEN (a personal access token with admin
+  # access); without it the hosted runners are always used, in
+  # particular for pull requests from other repositories.
+  choose-runners:
+    runs-on: ubuntu-latest
+    outputs:
+      linux-x86_64: ${{ steps.pick.outputs.linux-x86_64 }}
+      linux-arm64: ${{ steps.pick.outputs.linux-arm64 }}
+      macos-x86_64: ${{ steps.pick.outputs.macos-x86_64 }}
+      macos-arm64: ${{ steps.pick.outputs.macos-arm64 }}
+    steps:
+      - name: Prefer self-hosted runners, fall back to hosted
+        id: pick
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_ADMIN_TOKEN }}
+        run: |
+          # never route fork pull requests to self-hosted runners
+          if [ "${{ github.event_name }}" = "pull_request" ] \
+             && [ "${{ github.event.pull_request.head.repo.full_name || github.repository }}" != "fred-corp/qucsator_rf" ]; then
+            fork_pr=yes
+          else
+            fork_pr=no
+          fi
+          pick() {
+            labels_json="$1"; fallback="$2"
+            result="$fallback"
+            if [ "$fork_pr" = "no" ] && [ -n "${GH_TOKEN:-}" ]; then
+              http_code=$(curl -sS -o /tmp/runners.json -w '%{http_code}' \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                "https://api.github.com/repos/fred-corp/qucsator_rf/actions/runners?per_page=100" 2>/dev/null || true)
+              if [ "$http_code" = "200" ] && jq -e '(.runners | length) > 0' /tmp/runners.json >/dev/null 2>&1; then
+                echo "::warning::runners API: $(jq -r '[.runners[] | "\(.name) [" + ([.labels[].name] | join("|")) + "] (" + .status + ")"] | join("; ")' /tmp/runners.json)" >&2
+                if jq -e --argjson need "$labels_json" \
+                  '[.runners[] | select(.status == "online") | [.labels[].name | ascii_downcase]]
+                   | map(select(. as $l | ((($need | map(ascii_downcase)) - $l) | length) == 0))
+                   | length > 0' /tmp/runners.json >/dev/null 2>&1; then
+                  result="$labels_json"
+                fi
+              else
+                echo "::warning::runners API unavailable: HTTP ${http_code:-none}; using hosted runners" >&2
+              fi
+            elif [ "$fork_pr" = "no" ]; then
+              echo "::warning::RUNNER_ADMIN_TOKEN secret missing or empty; using hosted runners" >&2
+            fi
+            echo "$result"
+          }
+          {
+            echo "linux-x86_64=\"ubuntu-24.04\""
+            echo "linux-arm64=$(pick '["self-hosted","linux","arm64"]' '"ubuntu-24.04-arm"')"
+            echo "macos-x86_64=\"macos-15-intel\""
+            echo "macos-arm64=$(pick '["self-hosted","macOS","arm64"]' '"macos-latest"')"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: choose-runners
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            pick: linux-x86_64
+          - name: linux-arm64
+            pick: linux-arm64
+          - name: macos-x86_64
+            pick: macos-x86_64
+          - name: macos-arm64
+            pick: macos-arm64
+    runs-on: ${{ fromJson(needs.choose-runners.outputs[matrix.pick]) }}
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dos2unix gperf flex bison \
+            cmake build-essential python3
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install gperf dos2unix bison flex
+
+      - name: Configure and build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_INSTALL_PREFIX="$PWD/dist"
+          cmake --build build --parallel
+          cmake --install build
+
+      - name: Configure and build (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_INSTALL_PREFIX="$PWD/dist" \
+                -DBISON_EXECUTABLE="$(brew --prefix bison)/bin/bison" \
+                -DFLEX_EXECUTABLE="$(brew --prefix flex)/bin/flex"
+          cmake --build build --parallel
+          cmake --install build
+
+      - name: Smoke test (complex impedance power source)
+        run: |
+          printf 'Pac:P1 a gnd P=0.001 f=1e9 Z="49+j24" Num=1\nR:R1 a gnd R=50\n.SP:SP1 Type="lin" Start=1e9 Stop=1.1e9 Points=2\n' > complex_sp.txt
+          build/src/qucsator_rf -i complex_sp.txt -o complex_sp.dat
+          python3 contrib/ci/check_s11.py complex_sp.dat
+
+      - name: Smoke test (conjugate matched complex source)
+        run: |
+          printf 'Pac:P1 a gnd P=0.001 f=1e9 Z="1+j159.155" Num=1\nR:R1 a b R=1\nC:C1 b gnd C="1pF"\n.SP:SP1 Type="lin" Start=1e9 Stop=1e9 Points=2\n' > conjmatch.txt
+          build/src/qucsator_rf -i conjmatch.txt -o conjmatch.dat
+          python3 contrib/ci/check_conj_match.py conjmatch.dat
+
+      - name: Run basic netlist tests
+        run: |
+          for f in $(find tests/basic -name '*.net' ! -path '*spfile*'); do
+            echo "== $f"
+            build/src/qucsator_rf -i "$f" -o /tmp/qucsator_rf-test.dat
+          done
+
+      - name: Run the upstream qucs-test suite
+        if: matrix.name == 'linux-x86_64'
+        timeout-minutes: 45
+        run: |
+          sudo apt-get install -y python3 python3-matplotlib python3-numpy
+          sudo pip3 install --break-system-packages looseversion
+          git clone --depth 1 https://github.com/ra3xdh/qucs-test
+          cd qucs-test
+          # run.py passes globals to workers via fork; Python 3.14 defaults
+          # to forkserver, where the workers no longer see them
+          sed -i '1s|^|import multiprocessing; multiprocessing.set_start_method("fork", force=True)\n|' run.py
+          python run.py --qucsator \
+            --prefix="$PWD/../dist/bin" \
+            --exclude="$PWD/skip.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qucsator_rf-${{ matrix.name }}
+          path: dist/bin/qucsator_rf

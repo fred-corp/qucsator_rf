@@ -128,3 +128,6 @@ scan_vcd.cpp
 tokens_vcd.h
 
 *~
+
+.DS_Store
+.env
