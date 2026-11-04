@@ -88,8 +88,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y dos2unix gperf flex bison
-          sudo apt-get install -y python3 python3-matplotlib python3-numpy
-          sudo pip3 install looseversion
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
@@ -137,6 +135,8 @@ jobs:
         if: matrix.name == 'linux-x86_64'
         timeout-minutes: 45
         run: |
+          sudo apt-get install -y python3 python3-matplotlib python3-numpy
+          sudo pip3 install --break-system-packages looseversion
           git clone --depth 1 https://github.com/ra3xdh/qucs-test
           python qucs-test/run.py --qucsator \
             --prefix="$PWD/dist/bin" \
