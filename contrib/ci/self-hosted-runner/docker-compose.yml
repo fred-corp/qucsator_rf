@@ -1,0 +1,14 @@
+services:
+  github-runner:
+    image: myoung34/github-runner:latest
+    container_name: qucsator-runner
+    env_file: .env
+    volumes:
+      - ./runner-work:/home/runner/_work
+      - /var/run/docker.sock:/var/run/docker.sock
+    deploy:
+      resources:
+        limits:
+          cpus: "16"
+          memory: 24g
+    restart: unless-stopped
