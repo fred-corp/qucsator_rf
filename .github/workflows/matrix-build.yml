@@ -42,8 +42,8 @@ jobs:
               if [ "$http_code" = "200" ] && jq -e '(.runners | length) > 0' /tmp/runners.json >/dev/null 2>&1; then
                 echo "::warning::runners API: $(jq -r '[.runners[] | "\(.name) [" + ([.labels[].name] | join("|")) + "] (" + .status + ")"] | join("; ")' /tmp/runners.json)" >&2
                 if jq -e --argjson need "$labels_json" \
-                  '[.runners[] | select(.status == "online") | [.labels[].name]]
-                   | map(select(. as $l | (($need - $l) | length) == 0))
+                  '[.runners[] | select(.status == "online") | [.labels[].name | ascii_downcase]]
+                   | map(select(. as $l | ((($need | map(ascii_downcase)) - $l) | length) == 0))
                    | length > 0' /tmp/runners.json >/dev/null 2>&1; then
                   result="$labels_json"
                 fi
