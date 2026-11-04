@@ -40,7 +40,7 @@ jobs:
                 -H "Authorization: Bearer ${GH_TOKEN}" \
                 "https://api.github.com/repos/fred-corp/qucsator_rf/actions/runners?per_page=100" 2>/dev/null || true)
               if [ "$http_code" = "200" ] && jq -e '(.runners | length) > 0' /tmp/runners.json >/dev/null 2>&1; then
-                echo "::warning::runners API: $(jq -r '.runners | length' /tmp/runners.json) registered, $(jq -r '[.runners[] | select(.status == "online") | .name] | join(", ")' /tmp/runners.json) online" >&2
+                echo "::warning::runners API: $(jq -r '[.runners[] | "\(.name) [" + ([.labels[].name] | join("|")) + "] (" + .status + ")"] | join("; ")' /tmp/runners.json)" >&2
                 if jq -e --argjson need "$labels_json" \
                   '[.runners[] | select(.status == "online") | [.labels[].name]]
                    | map(select(. as $l | (($need - $l) | length) == 0))
