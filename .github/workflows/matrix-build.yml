@@ -140,6 +140,9 @@ jobs:
           sudo pip3 install --break-system-packages looseversion
           git clone --depth 1 https://github.com/ra3xdh/qucs-test
           cd qucs-test
+          # run.py passes globals to workers via fork; Python 3.14 defaults
+          # to forkserver, where the workers no longer see them
+          sed -i '1s|^|import multiprocessing; multiprocessing.set_start_method("fork", force=True)\n|' run.py
           python run.py --qucsator \
             --prefix="$PWD/../dist/bin" \
             --exclude="$PWD/skip.txt"
