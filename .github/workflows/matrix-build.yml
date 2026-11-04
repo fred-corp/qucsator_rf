@@ -139,9 +139,10 @@ jobs:
           sudo apt-get install -y python3 python3-matplotlib python3-numpy
           sudo pip3 install --break-system-packages looseversion
           git clone --depth 1 https://github.com/ra3xdh/qucs-test
-          python qucs-test/run.py --qucsator \
-            --prefix="$PWD/dist/bin" \
-            --exclude "$PWD/qucs-test/skip.txt"
+          cd qucs-test
+          python run.py --qucsator \
+            --prefix="$PWD/../dist/bin" \
+            --exclude="$PWD/skip.txt"
 
       - uses: actions/upload-artifact@v4
         with:
