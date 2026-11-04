@@ -36,14 +36,22 @@ jobs:
             labels_json="$1"; fallback="$2"
             result="$fallback"
             if [ "$fork_pr" = "no" ] && [ -n "${GH_TOKEN:-}" ]; then
-              json=$(curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" \
+              http_code=$(curl -sS -o /tmp/runners.json -w '%{http_code}' \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
                 "https://api.github.com/repos/fred-corp/qucsator_rf/actions/runners?per_page=100" 2>/dev/null || true)
-              if [ -n "$json" ] && printf '%s' "$json" | jq -e --argjson need "$labels_json" \
+              if [ "$http_code" = "200" ] && jq -e '(.runners | length) > 0' /tmp/runners.json >/dev/null 2>&1; then
+                echo "::warning::runners API: $(jq -r '.runners | length' /tmp/runners.json) registered, $(jq -r '[.runners[] | select(.status == "online") | .name] | join(", ")' /tmp/runners.json) online"
+                if jq -e --argjson need "$labels_json" \
                   '[.runners[] | select(.status == "online") | [.labels[].name]]
                    | map(select(. as $l | (($need - $l) | length) == 0))
-                   | length > 0' >/dev/null 2>&1; then
-                result="$labels_json"
+                   | length > 0' /tmp/runners.json >/dev/null 2>&1; then
+                  result="$labels_json"
+                fi
+              else
+                echo "::warning::runners API unavailable: HTTP ${http_code:-none}; using hosted runners"
               fi
+            elif [ "$fork_pr" = "no" ]; then
+              echo "::warning::RUNNER_ADMIN_TOKEN secret missing or empty; using hosted runners"
             fi
             echo "$result"
           }
