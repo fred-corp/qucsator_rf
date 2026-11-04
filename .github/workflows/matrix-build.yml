@@ -1,16 +1,17 @@
-name: Self-build
+name: Build (Linux/macOS x86_64/ARM64)
 
 on:
   push:
     branches: ["**"]
+  pull_request:
   workflow_dispatch:
 
 jobs:
   # Prefer online self-hosted runners registered to this fork, fall
-  # back to GitHub's hosted runners otherwise.  Requires the
-  # repository secret RUNNER_ADMIN_TOKEN (a personal access token
-  # with admin access); without it the hosted runners are always
-  # used, in particular for pull requests from other repositories.
+  # back to GitHub's hosted runners otherwise.  Requires the repository
+  # secret RUNNER_ADMIN_TOKEN (a personal access token with admin
+  # access); without it the hosted runners are always used, in
+  # particular for pull requests from other repositories.
   choose-runners:
     runs-on: ubuntu-latest
     outputs:
@@ -86,12 +87,22 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew install gperf dos2unix bison flex
-          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
 
-      - name: Configure and build
+      - name: Configure and build (Linux)
+        if: runner.os == 'Linux'
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_INSTALL_PREFIX="$PWD/dist"
+          cmake --build build --parallel
+          cmake --install build
+
+      - name: Configure and build (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_INSTALL_PREFIX="$PWD/dist" \
+                -DBISON_EXECUTABLE="$(brew --prefix bison)/bin/bison" \
+                -DFLEX_EXECUTABLE="$(brew --prefix flex)/bin/flex"
           cmake --build build --parallel
           cmake --install build
 
