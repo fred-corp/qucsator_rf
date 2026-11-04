@@ -40,7 +40,7 @@ jobs:
                 -H "Authorization: Bearer ${GH_TOKEN}" \
                 "https://api.github.com/repos/fred-corp/qucsator_rf/actions/runners?per_page=100" 2>/dev/null || true)
               if [ "$http_code" = "200" ] && jq -e '(.runners | length) > 0' /tmp/runners.json >/dev/null 2>&1; then
-                echo "::warning::runners API: $(jq -r '.runners | length' /tmp/runners.json) registered, $(jq -r '[.runners[] | select(.status == "online") | .name] | join(", ")' /tmp/runners.json) online"
+                echo "::warning::runners API: $(jq -r '.runners | length' /tmp/runners.json) registered, $(jq -r '[.runners[] | select(.status == "online") | .name] | join(", ")' /tmp/runners.json) online" >&2
                 if jq -e --argjson need "$labels_json" \
                   '[.runners[] | select(.status == "online") | [.labels[].name]]
                    | map(select(. as $l | (($need - $l) | length) == 0))
@@ -48,10 +48,10 @@ jobs:
                   result="$labels_json"
                 fi
               else
-                echo "::warning::runners API unavailable: HTTP ${http_code:-none}; using hosted runners"
+                echo "::warning::runners API unavailable: HTTP ${http_code:-none}; using hosted runners" >&2
               fi
             elif [ "$fork_pr" = "no" ]; then
-              echo "::warning::RUNNER_ADMIN_TOKEN secret missing or empty; using hosted runners"
+              echo "::warning::RUNNER_ADMIN_TOKEN secret missing or empty; using hosted runners" >&2
             fi
             echo "$result"
           }
